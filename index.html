@@ -34,6 +34,20 @@
         #auth-status, #calendar-status {
             transition: all 0.3s ease-in-out;
         }
+        .drag-over {
+            border-style: solid;
+            border-color: #3b82f6; /* Tailwind's blue-500 */
+            background-color: #eff6ff; /* Tailwind's blue-100 */
+        }
+        #camera-view {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.8);
+            z-index: 50;
+        }
     </style>
 </head>
 <body class="bg-gray-100 text-gray-800">
@@ -89,11 +103,19 @@
             <!-- Section 2: File Upload -->
             <div id="upload-section" class="opacity-50 pointer-events-none">
                 <h2 class="text-2xl font-semibold text-gray-800">2. Upload File</h2>
-                <div class="mt-4 p-6 border-2 border-dashed border-gray-300 rounded-lg text-center">
+                <div id="drop-area" class="mt-4 p-6 border-2 border-dashed border-gray-300 rounded-lg text-center transition-colors duration-300">
                     <input type="file" id="file-input" class="hidden" accept="image/*,application/pdf">
                     <label for="file-input" class="cursor-pointer text-blue-600 font-semibold">
                         Choose an image or PDF file
                     </label>
+                    <p class="text-sm text-gray-500">or drag and drop it here</p>
+                    <button id="camera-btn" class="mt-4 inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-gray-600 hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                          <path d="M2 6a2 2 0 012-2h1.172a2 2 0 011.414.586l.828.828A2 2 0 008.828 6H12a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
+                          <path d="M15 8a1 1 0 10-2 0v2a1 1 0 102 0V8z" />
+                        </svg>
+                        Use Camera
+                    </button>
                     <p id="file-name" class="text-sm text-gray-500 mt-2">No file selected</p>
                 </div>
             </div>
@@ -134,7 +156,6 @@
                                     <label class="font-semibold">Time:</label>
                                     <p id="event-time" class="text-gray-700 bg-white p-2 rounded"></p>
                                 </div>
-                                <!-- NEW FIELDS -->
                                 <div>
                                     <label class="font-semibold">Host:</label>
                                     <p id="event-host" class="text-gray-700 bg-white p-2 rounded"></p>
@@ -160,6 +181,16 @@
         </main>
     </div>
 
+    <!-- Camera View Modal -->
+    <div id="camera-view" class="hidden items-center justify-center flex-col p-4">
+        <video id="camera-video" class="w-full max-w-3xl h-auto rounded-lg" autoplay playsinline></video>
+        <div class="mt-4 space-x-4">
+            <button id="capture-btn" class="px-6 py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700">Capture</button>
+            <button id="close-camera-btn" class="px-6 py-3 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700">Close</button>
+        </div>
+    </div>
+
+
     <script>
         // DOM Elements
         const settingsSection = document.getElementById('settings-section');
@@ -175,6 +206,8 @@
         const uploadSection = document.getElementById('upload-section');
         const fileInput = document.getElementById('file-input');
         const fileNameEl = document.getElementById('file-name');
+        const dropArea = document.getElementById('drop-area');
+        const cameraBtn = document.getElementById('camera-btn');
         
         const scanSection = document.getElementById('scan-section');
         const previewContainer = document.getElementById('preview-container');
@@ -190,13 +223,17 @@
         const eventTitle = document.getElementById('event-title');
         const eventDate = document.getElementById('event-date');
         const eventTime = document.getElementById('event-time');
-        // NEW DOM Elements
         const eventHost = document.getElementById('event-host');
         const eventLocation = document.getElementById('event-location');
         const eventRemark = document.getElementById('event-remark');
         
         const addToCalendarBtn = document.getElementById('add-to-calendar-btn');
         const calendarStatus = document.getElementById('calendar-status');
+
+        const cameraView = document.getElementById('camera-view');
+        const cameraVideo = document.getElementById('camera-video');
+        const captureBtn = document.getElementById('capture-btn');
+        const closeCameraBtn = document.getElementById('close-camera-btn');
 
         let API_KEY = '';
         let CLIENT_ID = '';
@@ -205,6 +242,7 @@
         let gsiInited = false;
         let currentFile = null;
         let extractedEvent = null;
+        let cameraStream = null;
 
         // --- 1. Settings and Google Auth ---
 
@@ -274,10 +312,8 @@
                     callback: (tokenResponse) => {
                         if (tokenResponse && tokenResponse.access_token) {
                             gapi.client.setToken(tokenResponse);
-                            updateAuthUi(true);
                         } else {
                             console.error('Invalid token response:', tokenResponse);
-                            updateAuthUi(false);
                         }
                     },
                     error_callback: (error) => {
@@ -311,12 +347,17 @@
             }
         }
 
-        // --- 2. File Handling ---
-
-        fileInput.addEventListener('change', (event) => {
-            const file = event.target.files[0];
+        // --- 2. File Handling (with Drag-Drop and Camera) ---
+        
+        function handleFile(file) {
             if (!file) return;
             
+            // Validate file type
+            if (!file.type.startsWith('image/') && file.type !== 'application/pdf') {
+                alert('Invalid file type. Please upload an image or PDF.');
+                return;
+            }
+
             currentFile = file;
             fileNameEl.textContent = file.name;
             scanSection.classList.remove('hidden');
@@ -327,7 +368,67 @@
             } else if (file.type === 'application/pdf') {
                 displayPdf(file);
             }
+        }
+
+        fileInput.addEventListener('change', (event) => {
+            handleFile(event.target.files[0]);
         });
+
+        // Drag and Drop Events
+        dropArea.addEventListener('dragover', (event) => {
+            event.preventDefault();
+            dropArea.classList.add('drag-over');
+        });
+
+        dropArea.addEventListener('dragleave', () => {
+            dropArea.classList.remove('drag-over');
+        });
+
+        dropArea.addEventListener('drop', (event) => {
+            event.preventDefault();
+            dropArea.classList.remove('drag-over');
+            const file = event.dataTransfer.files[0];
+            handleFile(file);
+        });
+
+        // Camera Events
+        cameraBtn.addEventListener('click', async () => {
+            if (cameraStream) {
+                cameraStream.getTracks().forEach(track => track.stop());
+            }
+            try {
+                cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+                cameraVideo.srcObject = cameraStream;
+                cameraView.classList.remove('hidden');
+                cameraView.classList.add('flex');
+            } catch (err) {
+                console.error("Error accessing camera:", err);
+                alert("Could not access camera. Please ensure you have given permission.");
+            }
+        });
+
+        closeCameraBtn.addEventListener('click', () => {
+            if (cameraStream) {
+                cameraStream.getTracks().forEach(track => track.stop());
+            }
+            cameraView.classList.add('hidden');
+            cameraView.classList.remove('flex');
+        });
+
+        captureBtn.addEventListener('click', () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = cameraVideo.videoWidth;
+            canvas.height = cameraVideo.videoHeight;
+            const context = canvas.getContext('2d');
+            context.drawImage(cameraVideo, 0, 0, canvas.width, canvas.height);
+            
+            canvas.toBlob((blob) => {
+                const capturedFile = new File([blob], "capture.jpg", { type: "image/jpeg" });
+                handleFile(capturedFile);
+                closeCameraBtn.click(); // Close camera view after capture
+            }, 'image/jpeg');
+        });
+
 
         function displayImage(file) {
             const reader = new FileReader();
@@ -403,7 +504,6 @@
                 
                 const base64ImageData = base64Data.split(',')[1];
 
-                // UPDATED PROMPT
                 const prompt = `Analyze this document. Extract the following information: event title, full date (including year), start time, host, location, and a brief remark or summary.
 Respond ONLY with a valid JSON object with the following keys: "title", "date", "time", "host", "location", "remark".
 - "title" should be a concise string.
@@ -413,7 +513,8 @@ Respond ONLY with a valid JSON object with the following keys: "title", "date", 
 - "location" should be the meeting place or address.
 - "remark" should be any additional notes or summary.
 If any piece of information is not found, its value should be an empty string "".
-Example response: {"title": "Team Meeting", "date": "2025-09-15", "time": "14:00", "host": "Engineering Dept.", "location": "Room 301", "remark": "Discuss Q3 results."}`;
+Please respond in Traditional Chinese (zh-tw).
+Example response: {"title": "團隊會議", "date": "2025-09-15", "time": "14:00", "host": "工程部門", "location": "301會議室", "remark": "討論第三季成果。"}`;
 
                 const payload = {
                     contents: [{
@@ -457,22 +558,21 @@ Example response: {"title": "Team Meeting", "date": "2025-09-15", "time": "14:00
             }
         });
 
-        // UPDATED FUNCTION
         function handleAiResponse(data) {
             if (data && data.date) {
                 extractedEvent = data;
-                eventTitle.textContent = data.title || 'No title found';
+                eventTitle.textContent = data.title || '無標題';
                 eventDate.textContent = data.date;
-                eventTime.textContent = data.time || 'Not specified';
-                eventHost.textContent = data.host || 'Not specified';
-                eventLocation.textContent = data.location || 'Not specified';
-                eventRemark.textContent = data.remark || 'No remarks found';
+                eventTime.textContent = data.time || '未指定';
+                eventHost.textContent = data.host || '未指定';
+                eventLocation.textContent = data.location || '未指定';
+                eventRemark.textContent = data.remark || '無備註';
                 
                 eventDetails.classList.remove('hidden');
                 resultsPlaceholder.classList.add('hidden');
                 addToCalendarBtn.disabled = false;
             } else {
-                resultsPlaceholder.textContent = 'Could not find a valid date in the document. Please try another file.';
+                resultsPlaceholder.textContent = '無法在文件中找到有效日期，請嘗試其他文件。';
                 resultsPlaceholder.classList.remove('hidden');
                 addToCalendarBtn.disabled = true;
             }
@@ -526,7 +626,6 @@ Example response: {"title": "Team Meeting", "date": "2025-09-15", "time": "14:00
             }
         });
         
-        // UPDATED FUNCTION
         function createCalendarEventObject() {
             const { title, date, time, host, location, remark } = extractedEvent;
             
@@ -545,13 +644,12 @@ Example response: {"title": "Team Meeting", "date": "2025-09-15", "time": "14:00
                 endDateTime = nextDay.toISOString().split('T')[0];
             }
             
-            // Build description string
             let description = '';
             if (host) {
-                description += `Host: ${host}\n\n`;
+                description += `主辦單位: ${host}\n\n`;
             }
             if (remark) {
-                description += `Remarks:\n${remark}`;
+                description += `備註:\n${remark}`;
             }
 
             const eventResource = {
