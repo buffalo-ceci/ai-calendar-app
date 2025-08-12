@@ -63,7 +63,6 @@
                         <li>Copy the **Client ID** below.</li>
                     </ol>
                     
-                    <!-- NEW: Auto-detect URL section -->
                     <div class="mt-4 p-3 bg-blue-100 border border-blue-300 rounded-lg">
                         <p class="text-sm font-medium text-gray-800">Your App's Origin URL (for Step 5):</p>
                         <div class="flex items-center mt-1">
@@ -122,7 +121,7 @@
                         <div id="results-container" class="p-4 bg-blue-50 rounded-lg border border-blue-200 min-h-[200px] space-y-3">
                             <div id="loader" class="hidden loader mx-auto"></div>
                             <p id="results-placeholder" class="text-gray-500">AI analysis results will appear here...</p>
-                            <div id="event-details" class="hidden">
+                            <div id="event-details" class="hidden space-y-3">
                                 <div>
                                     <label class="font-semibold">Title:</label>
                                     <p id="event-title" class="text-gray-700 bg-white p-2 rounded"></p>
@@ -134,6 +133,19 @@
                                 <div>
                                     <label class="font-semibold">Time:</label>
                                     <p id="event-time" class="text-gray-700 bg-white p-2 rounded"></p>
+                                </div>
+                                <!-- NEW FIELDS -->
+                                <div>
+                                    <label class="font-semibold">Host:</label>
+                                    <p id="event-host" class="text-gray-700 bg-white p-2 rounded"></p>
+                                </div>
+                                <div>
+                                    <label class="font-semibold">Meeting Place:</label>
+                                    <p id="event-location" class="text-gray-700 bg-white p-2 rounded"></p>
+                                </div>
+                                <div>
+                                    <label class="font-semibold">Remark:</label>
+                                    <p id="event-remark" class="text-gray-700 bg-white p-2 rounded min-h-[50px] whitespace-pre-wrap"></p>
                                 </div>
                             </div>
                         </div>
@@ -178,6 +190,10 @@
         const eventTitle = document.getElementById('event-title');
         const eventDate = document.getElementById('event-date');
         const eventTime = document.getElementById('event-time');
+        // NEW DOM Elements
+        const eventHost = document.getElementById('event-host');
+        const eventLocation = document.getElementById('event-location');
+        const eventRemark = document.getElementById('event-remark');
         
         const addToCalendarBtn = document.getElementById('add-to-calendar-btn');
         const calendarStatus = document.getElementById('calendar-status');
@@ -199,7 +215,6 @@
 
         copyUrlBtn.addEventListener('click', () => {
             detectedUrlInput.select();
-            // Use execCommand for broader compatibility in iframe environments
             document.execCommand('copy');
             copyUrlBtn.textContent = 'Copied!';
             setTimeout(() => {
@@ -296,28 +311,6 @@
             }
         }
 
-        function handleSignoutClick() {
-            const token = gapi.client.getToken();
-            if (token !== null) {
-                google.accounts.oauth2.revoke(token.access_token, () => {
-                    gapi.client.setToken('');
-                    updateAuthUi(false);
-                });
-            }
-        }
-        
-        function updateAuthUi(isSignedIn) {
-            // This is a simplified example. A real app would have login/logout buttons.
-            // For now, we just reflect status.
-            if (isSignedIn) {
-                calendarStatus.textContent = 'Logged in to Google. Ready to add events.';
-                calendarStatus.className = 'text-green-600';
-            } else {
-                calendarStatus.textContent = 'Logged out from Google.';
-                calendarStatus.className = 'text-gray-600';
-            }
-        }
-
         // --- 2. File Handling ---
 
         fileInput.addEventListener('change', (event) => {
@@ -353,7 +346,7 @@
                 reader.onload = async (e) => {
                     const typedarray = new Uint8Array(e.target.result);
                     const pdf = await pdfjsLib.getDocument(typedarray).promise;
-                    const page = await pdf.getPage(1); // Render first page
+                    const page = await pdf.getPage(1);
                     
                     const viewport = page.getViewport({ scale: 1.5 });
                     const canvasContext = pdfCanvas.getContext('2d');
@@ -408,16 +401,19 @@
                     mimeType = 'image/jpeg';
                 }
                 
-                // Remove the data URL prefix
                 const base64ImageData = base64Data.split(',')[1];
 
-                const prompt = `Analyze this document. Extract the main event title, the full date (including year), and the start time.
-Respond ONLY with a valid JSON object with the following keys: "title", "date", "time".
+                // UPDATED PROMPT
+                const prompt = `Analyze this document. Extract the following information: event title, full date (including year), start time, host, location, and a brief remark or summary.
+Respond ONLY with a valid JSON object with the following keys: "title", "date", "time", "host", "location", "remark".
 - "title" should be a concise string.
 - "date" should be in YYYY-MM-DD format.
 - "time" should be in HH:MM (24-hour) format.
-If any piece of information is not found, its value should be null.
-Example response: {"title": "Team Meeting", "date": "2025-09-15", "time": "14:00"}`;
+- "host" should be the organizing body or person.
+- "location" should be the meeting place or address.
+- "remark" should be any additional notes or summary.
+If any piece of information is not found, its value should be an empty string "".
+Example response: {"title": "Team Meeting", "date": "2025-09-15", "time": "14:00", "host": "Engineering Dept.", "location": "Room 301", "remark": "Discuss Q3 results."}`;
 
                 const payload = {
                     contents: [{
@@ -431,7 +427,6 @@ Example response: {"title": "Team Meeting", "date": "2025-09-15", "time": "14:00
                     }
                 };
 
-                // **FIXED**: Use the API_KEY from settings for the AI scan
                 const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${API_KEY}`;
 
                 const response = await fetch(apiUrl, {
@@ -462,12 +457,16 @@ Example response: {"title": "Team Meeting", "date": "2025-09-15", "time": "14:00
             }
         });
 
+        // UPDATED FUNCTION
         function handleAiResponse(data) {
             if (data && data.date) {
                 extractedEvent = data;
                 eventTitle.textContent = data.title || 'No title found';
                 eventDate.textContent = data.date;
                 eventTime.textContent = data.time || 'Not specified';
+                eventHost.textContent = data.host || 'Not specified';
+                eventLocation.textContent = data.location || 'Not specified';
+                eventRemark.textContent = data.remark || 'No remarks found';
                 
                 eventDetails.classList.remove('hidden');
                 resultsPlaceholder.classList.add('hidden');
@@ -494,11 +493,10 @@ Example response: {"title": "Team Meeting", "date": "2025-09-15", "time": "14:00
                 return;
             }
             
-            // Check for Google login status
             if (gapi.client.getToken() === null) {
                 calendarStatus.textContent = 'Please log in to Google to add events.';
                 calendarStatus.className = 'text-yellow-600';
-                handleAuthClick(); // Prompt user to log in
+                handleAuthClick();
                 return;
             }
 
@@ -517,7 +515,6 @@ Example response: {"title": "Team Meeting", "date": "2025-09-15", "time": "14:00
                     calendarStatus.innerHTML = `Event successfully created! <a href="${eventResponse.htmlLink}" target="_blank" class="text-blue-600 underline">View on Calendar</a>`;
                     calendarStatus.className = 'text-green-600';
                     addToCalendarBtn.textContent = 'Add to Google Calendar';
-                    // Don't re-enable, to prevent duplicate adds. User can re-scan.
                 });
 
             } catch (error) {
@@ -529,32 +526,38 @@ Example response: {"title": "Team Meeting", "date": "2025-09-15", "time": "14:00
             }
         });
         
+        // UPDATED FUNCTION
         function createCalendarEventObject() {
-            const { title, date, time } = extractedEvent;
+            const { title, date, time, host, location, remark } = extractedEvent;
             
             let startDateTime, endDateTime;
             
             if (time) {
-                // Event has a specific time
                 const startTimeString = `${date}T${time}:00`;
                 const start = new Date(startTimeString);
-                // Default to a 1-hour duration
-                const end = new Date(start.getTime() + 60 * 60 * 1000);
-                
+                const end = new Date(start.getTime() + 60 * 60 * 1000); // Default 1 hour duration
                 startDateTime = start.toISOString();
                 endDateTime = end.toISOString();
             } else {
-                // All-day event
-                startDateTime = date; // Format YYYY-MM-DD
-                
-                // For all-day events, the end date is exclusive. So add one day.
+                startDateTime = date;
                 const nextDay = new Date(date);
-                nextDay.setDate(nextDay.getDate() + 2); // Add 2 to account for timezone issues and get the next day correctly
+                nextDay.setDate(nextDay.getDate() + 2);
                 endDateTime = nextDay.toISOString().split('T')[0];
             }
             
+            // Build description string
+            let description = '';
+            if (host) {
+                description += `Host: ${host}\n\n`;
+            }
+            if (remark) {
+                description += `Remarks:\n${remark}`;
+            }
+
             const eventResource = {
                 'summary': title || 'New Event from Scan',
+                'location': location || '',
+                'description': description.trim(),
                 'start': {},
                 'end': {}
             };
@@ -572,7 +575,6 @@ Example response: {"title": "Team Meeting", "date": "2025-09-15", "time": "14:00
 
         // --- Initial Load ---
         window.onload = () => {
-            // Display the origin URL for the user
             detectedUrlInput.value = window.location.origin;
             loadCredentials();
         };
