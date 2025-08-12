@@ -1,1 +1,582 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Event Scanner & Calendar Assistant</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- PDF.js library for PDF rendering -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.min.js"></script>
+    <script>
+        // Set worker source for PDF.js
+        pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.worker.min.js`;
+    </script>
+    <!-- Google API Client Library -->
+    <script src="https://apis.google.com/js/api.js"></script>
+    <script src="https://accounts.google.com/gsi/client"></script>
 
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .loader {
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #3498db;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        #auth-status, #calendar-status {
+            transition: all 0.3s ease-in-out;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+
+    <div class="container mx-auto p-4 md:p-8 max-w-4xl">
+        <header class="text-center mb-8">
+            <h1 class="text-4xl font-bold text-gray-900">AI Event Scanner</h1>
+            <p class="text-lg text-gray-600 mt-2">Upload an image or PDF to find dates and add them to your Google Calendar.</p>
+        </header>
+
+        <main class="bg-white rounded-xl shadow-lg p-6 md:p-8 space-y-8">
+
+            <!-- Section 1: Google API Settings -->
+            <div id="settings-section">
+                <div class="flex items-center justify-between">
+                    <h2 class="text-2xl font-semibold text-gray-800">1. Google Calendar Settings</h2>
+                    <button id="toggle-settings-btn" class="text-sm text-blue-600 hover:underline">Show</button>
+                </div>
+                 <div id="settings-content" class="hidden mt-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                    <p class="text-sm text-gray-600 mb-4">To add events to your calendar, you need to provide your own Google API credentials. This is a one-time setup.</p>
+                    <ol class="list-decimal list-inside text-sm space-y-2 mb-4">
+                        <li>Go to the <a href="https://console.cloud.google.com/apis/credentials" target="_blank" class="text-blue-600 hover:underline">Google Cloud Console</a>.</li>
+                        <li>Create a new project if you don't have one.</li>
+                        <li>Create an **API Key**. Copy it below.</li>
+                        <li>Create an **OAuth 2.0 Client ID** of type "Web application".</li>
+                        <li>For "Authorized JavaScript origins", use the URL shown in the box below.</li>
+                        <li>Copy the **Client ID** below.</li>
+                    </ol>
+                    
+                    <!-- NEW: Auto-detect URL section -->
+                    <div class="mt-4 p-3 bg-blue-100 border border-blue-300 rounded-lg">
+                        <p class="text-sm font-medium text-gray-800">Your App's Origin URL (for Step 5):</p>
+                        <div class="flex items-center mt-1">
+                            <input type="text" id="detected-url" readonly class="flex-grow bg-white p-2 border rounded-l-md text-gray-700">
+                            <button id="copy-url-btn" class="bg-blue-500 text-white p-2 rounded-r-md hover:bg-blue-600 font-semibold">Copy</button>
+                        </div>
+                    </div>
+
+                    <div class="space-y-4 mt-4">
+                        <div>
+                            <label for="api-key-input" class="block text-sm font-medium text-gray-700">Google API Key</label>
+                            <input type="password" id="api-key-input" class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" placeholder="Paste your API Key here">
+                        </div>
+                        <div>
+                            <label for="client-id-input" class="block text-sm font-medium text-gray-700">Google Client ID</label>
+                            <input type="password" id="client-id-input" class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" placeholder="Paste your Client ID here">
+                        </div>
+                        <button id="save-settings-btn" class="w-full bg-blue-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-700 transition duration-300">Save & Initialize</button>
+                    </div>
+                    <div id="auth-status" class="mt-4 text-center"></div>
+                </div>
+            </div>
+
+            <!-- Section 2: File Upload -->
+            <div id="upload-section" class="opacity-50 pointer-events-none">
+                <h2 class="text-2xl font-semibold text-gray-800">2. Upload File</h2>
+                <div class="mt-4 p-6 border-2 border-dashed border-gray-300 rounded-lg text-center">
+                    <input type="file" id="file-input" class="hidden" accept="image/*,application/pdf">
+                    <label for="file-input" class="cursor-pointer text-blue-600 font-semibold">
+                        Choose an image or PDF file
+                    </label>
+                    <p id="file-name" class="text-sm text-gray-500 mt-2">No file selected</p>
+                </div>
+            </div>
+
+            <!-- Section 3: Scan & Results -->
+            <div id="scan-section" class="hidden">
+                 <h2 class="text-2xl font-semibold text-gray-800">3. Scan & Review</h2>
+                 <div class="mt-4 grid md:grid-cols-2 gap-6 items-start">
+                    <!-- Preview -->
+                    <div class="w-full">
+                        <h3 class="font-semibold text-lg mb-2">Preview</h3>
+                        <div id="preview-container" class="w-full bg-gray-100 rounded-lg border flex items-center justify-center min-h-[200px]">
+                           <p id="preview-placeholder" class="text-gray-500">Your file preview will appear here</p>
+                           <img id="image-preview" class="hidden max-w-full max-h-96 rounded-lg object-contain">
+                           <canvas id="pdf-canvas" class="hidden max-w-full rounded-lg"></canvas>
+                        </div>
+                         <button id="scan-btn" class="mt-4 w-full bg-green-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-green-700 transition duration-300 flex items-center justify-center gap-2">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd" /></svg>
+                            Scan File with AI
+                        </button>
+                    </div>
+                    <!-- Results -->
+                    <div class="w-full">
+                        <h3 class="font-semibold text-lg mb-2">Extracted Information</h3>
+                        <div id="results-container" class="p-4 bg-blue-50 rounded-lg border border-blue-200 min-h-[200px] space-y-3">
+                            <div id="loader" class="hidden loader mx-auto"></div>
+                            <p id="results-placeholder" class="text-gray-500">AI analysis results will appear here...</p>
+                            <div id="event-details" class="hidden">
+                                <div>
+                                    <label class="font-semibold">Title:</label>
+                                    <p id="event-title" class="text-gray-700 bg-white p-2 rounded"></p>
+                                </div>
+                                <div>
+                                    <label class="font-semibold">Date:</label>
+                                    <p id="event-date" class="text-gray-700 bg-white p-2 rounded"></p>
+                                </div>
+                                <div>
+                                    <label class="font-semibold">Time:</label>
+                                    <p id="event-time" class="text-gray-700 bg-white p-2 rounded"></p>
+                                </div>
+                            </div>
+                        </div>
+                        <button id="add-to-calendar-btn" disabled class="mt-4 w-full bg-purple-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-purple-700 transition duration-300 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+                           <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clip-rule="evenodd" /></svg>
+                           Add to Google Calendar
+                        </button>
+                    </div>
+                </div>
+            </div>
+             <div id="calendar-status" class="mt-4 text-center"></div>
+        </main>
+    </div>
+
+    <script>
+        // DOM Elements
+        const settingsSection = document.getElementById('settings-section');
+        const toggleSettingsBtn = document.getElementById('toggle-settings-btn');
+        const settingsContent = document.getElementById('settings-content');
+        const apiKeyInput = document.getElementById('api-key-input');
+        const clientIdInput = document.getElementById('client-id-input');
+        const saveSettingsBtn = document.getElementById('save-settings-btn');
+        const authStatus = document.getElementById('auth-status');
+        const detectedUrlInput = document.getElementById('detected-url');
+        const copyUrlBtn = document.getElementById('copy-url-btn');
+        
+        const uploadSection = document.getElementById('upload-section');
+        const fileInput = document.getElementById('file-input');
+        const fileNameEl = document.getElementById('file-name');
+        
+        const scanSection = document.getElementById('scan-section');
+        const previewContainer = document.getElementById('preview-container');
+        const previewPlaceholder = document.getElementById('preview-placeholder');
+        const imagePreview = document.getElementById('image-preview');
+        const pdfCanvas = document.getElementById('pdf-canvas');
+        
+        const scanBtn = document.getElementById('scan-btn');
+        const resultsContainer = document.getElementById('results-container');
+        const loader = document.getElementById('loader');
+        const resultsPlaceholder = document.getElementById('results-placeholder');
+        const eventDetails = document.getElementById('event-details');
+        const eventTitle = document.getElementById('event-title');
+        const eventDate = document.getElementById('event-date');
+        const eventTime = document.getElementById('event-time');
+        
+        const addToCalendarBtn = document.getElementById('add-to-calendar-btn');
+        const calendarStatus = document.getElementById('calendar-status');
+
+        let API_KEY = '';
+        let CLIENT_ID = '';
+        let tokenClient;
+        let gapiInited = false;
+        let gsiInited = false;
+        let currentFile = null;
+        let extractedEvent = null;
+
+        // --- 1. Settings and Google Auth ---
+
+        toggleSettingsBtn.addEventListener('click', () => {
+            const isHidden = settingsContent.classList.toggle('hidden');
+            toggleSettingsBtn.textContent = isHidden ? 'Show' : 'Hide';
+        });
+
+        copyUrlBtn.addEventListener('click', () => {
+            detectedUrlInput.select();
+            // Use execCommand for broader compatibility in iframe environments
+            document.execCommand('copy');
+            copyUrlBtn.textContent = 'Copied!';
+            setTimeout(() => {
+                copyUrlBtn.textContent = 'Copy';
+            }, 2000);
+        });
+
+        saveSettingsBtn.addEventListener('click', () => {
+            API_KEY = apiKeyInput.value.trim();
+            CLIENT_ID = clientIdInput.value.trim();
+
+            if (!API_KEY || !CLIENT_ID) {
+                authStatus.textContent = 'Please provide both API Key and Client ID.';
+                authStatus.className = 'text-red-600';
+                return;
+            }
+            
+            localStorage.setItem('googleApiKey', API_KEY);
+            localStorage.setItem('googleClientId', CLIENT_ID);
+
+            authStatus.textContent = 'Settings saved. Initializing...';
+            authStatus.className = 'text-blue-600';
+            initializeGapiClient();
+        });
+
+        function loadCredentials() {
+            const savedApiKey = localStorage.getItem('googleApiKey');
+            const savedClientId = localStorage.getItem('googleClientId');
+            if (savedApiKey && savedClientId) {
+                apiKeyInput.value = savedApiKey;
+                clientIdInput.value = savedClientId;
+                API_KEY = savedApiKey;
+                CLIENT_ID = savedClientId;
+                initializeGapiClient();
+            }
+        }
+
+        function initializeGapiClient() {
+            gapi.load('client', () => {
+                gapi.client.init({
+                    apiKey: API_KEY,
+                    discoveryDocs: ["https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest"],
+                }).then(() => {
+                    gapiInited = true;
+                    maybeEnableApp();
+                }).catch(err => {
+                    console.error("Error initializing GAPI client:", err);
+                    authStatus.textContent = `GAPI Init Error: ${err.details || err.message || 'Check console.'}`;
+                    authStatus.className = 'text-red-600 font-bold';
+                });
+            });
+            
+            try {
+                tokenClient = google.accounts.oauth2.initTokenClient({
+                    client_id: CLIENT_ID,
+                    scope: 'https://www.googleapis.com/auth/calendar.events',
+                    callback: (tokenResponse) => {
+                        if (tokenResponse && tokenResponse.access_token) {
+                            gapi.client.setToken(tokenResponse);
+                            updateAuthUi(true);
+                        } else {
+                            console.error('Invalid token response:', tokenResponse);
+                            updateAuthUi(false);
+                        }
+                    },
+                    error_callback: (error) => {
+                        console.error('GSI Error:', error);
+                        authStatus.textContent = `Login Error: ${error.type || 'See console.'}`;
+                        authStatus.className = 'text-red-600';
+                    }
+                });
+                gsiInited = true;
+                maybeEnableApp();
+            } catch (error) {
+                 console.error("Error initializing GSI client:", error);
+                 authStatus.textContent = `GSI Init Error: Could not initialize login. Check Client ID and Origin URL.`;
+                 authStatus.className = 'text-red-600 font-bold';
+            }
+        }
+
+        function maybeEnableApp() {
+            if (gapiInited && gsiInited) {
+                uploadSection.classList.remove('opacity-50', 'pointer-events-none');
+                authStatus.textContent = 'Google API Initialized. You can now upload a file.';
+                authStatus.className = 'text-green-600';
+            }
+        }
+        
+        function handleAuthClick() {
+            if (gapi.client.getToken() === null) {
+                tokenClient.requestAccessToken({prompt: 'consent'});
+            } else {
+                tokenClient.requestAccessToken({prompt: ''});
+            }
+        }
+
+        function handleSignoutClick() {
+            const token = gapi.client.getToken();
+            if (token !== null) {
+                google.accounts.oauth2.revoke(token.access_token, () => {
+                    gapi.client.setToken('');
+                    updateAuthUi(false);
+                });
+            }
+        }
+        
+        function updateAuthUi(isSignedIn) {
+            // This is a simplified example. A real app would have login/logout buttons.
+            // For now, we just reflect status.
+            if (isSignedIn) {
+                calendarStatus.textContent = 'Logged in to Google. Ready to add events.';
+                calendarStatus.className = 'text-green-600';
+            } else {
+                calendarStatus.textContent = 'Logged out from Google.';
+                calendarStatus.className = 'text-gray-600';
+            }
+        }
+
+        // --- 2. File Handling ---
+
+        fileInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            currentFile = file;
+            fileNameEl.textContent = file.name;
+            scanSection.classList.remove('hidden');
+            resetResults();
+
+            if (file.type.startsWith('image/')) {
+                displayImage(file);
+            } else if (file.type === 'application/pdf') {
+                displayPdf(file);
+            }
+        });
+
+        function displayImage(file) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                imagePreview.src = e.target.result;
+                imagePreview.classList.remove('hidden');
+                pdfCanvas.classList.add('hidden');
+                previewPlaceholder.classList.add('hidden');
+            };
+            reader.readAsDataURL(file);
+        }
+
+        async function displayPdf(file) {
+            try {
+                const reader = new FileReader();
+                reader.onload = async (e) => {
+                    const typedarray = new Uint8Array(e.target.result);
+                    const pdf = await pdfjsLib.getDocument(typedarray).promise;
+                    const page = await pdf.getPage(1); // Render first page
+                    
+                    const viewport = page.getViewport({ scale: 1.5 });
+                    const canvasContext = pdfCanvas.getContext('2d');
+                    pdfCanvas.height = viewport.height;
+                    pdfCanvas.width = viewport.width;
+                    
+                    await page.render({ canvasContext, viewport }).promise;
+                    
+                    pdfCanvas.classList.remove('hidden');
+                    imagePreview.classList.add('hidden');
+                    previewPlaceholder.classList.add('hidden');
+                };
+                reader.readAsArrayBuffer(file);
+            } catch (error) {
+                console.error('Error rendering PDF:', error);
+                previewPlaceholder.textContent = 'Error rendering PDF preview.';
+                previewPlaceholder.classList.remove('hidden');
+            }
+        }
+        
+        function resetResults() {
+            loader.classList.add('hidden');
+            resultsPlaceholder.classList.remove('hidden');
+            eventDetails.classList.add('hidden');
+            addToCalendarBtn.disabled = true;
+            extractedEvent = null;
+            calendarStatus.textContent = '';
+        }
+
+        // --- 3. AI Scanning ---
+
+        scanBtn.addEventListener('click', async () => {
+            if (!currentFile) {
+                alert('Please select a file first.');
+                return;
+            }
+            
+            loader.classList.remove('hidden');
+            resultsPlaceholder.classList.add('hidden');
+            eventDetails.classList.add('hidden');
+            scanBtn.disabled = true;
+            
+            try {
+                let base64Data;
+                let mimeType;
+
+                if (currentFile.type.startsWith('image/')) {
+                    base64Data = await toBase64(currentFile);
+                    mimeType = currentFile.type;
+                } else if (currentFile.type === 'application/pdf') {
+                    base64Data = pdfCanvas.toDataURL('image/jpeg');
+                    mimeType = 'image/jpeg';
+                }
+                
+                // Remove the data URL prefix
+                const base64ImageData = base64Data.split(',')[1];
+
+                const prompt = `Analyze this document. Extract the main event title, the full date (including year), and the start time.
+Respond ONLY with a valid JSON object with the following keys: "title", "date", "time".
+- "title" should be a concise string.
+- "date" should be in YYYY-MM-DD format.
+- "time" should be in HH:MM (24-hour) format.
+If any piece of information is not found, its value should be null.
+Example response: {"title": "Team Meeting", "date": "2025-09-15", "time": "14:00"}`;
+
+                const payload = {
+                    contents: [{
+                        parts: [
+                            { text: prompt },
+                            { inlineData: { mimeType: mimeType, data: base64ImageData } }
+                        ]
+                    }],
+                    generationConfig: {
+                        responseMimeType: "application/json",
+                    }
+                };
+
+                // **FIXED**: Use the API_KEY from settings for the AI scan
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${API_KEY}`;
+
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    const errorBody = await response.json();
+                    console.error("API Error Body:", errorBody);
+                    throw new Error(`API Error: ${response.status} ${response.statusText}`);
+                }
+
+                const result = await response.json();
+                const text = result.candidates[0].content.parts[0].text;
+                const parsedJson = JSON.parse(text);
+
+                handleAiResponse(parsedJson);
+
+            } catch (error) {
+                console.error('Error during AI scan:', error);
+                resultsPlaceholder.textContent = `Error: ${error.message}`;
+                resultsPlaceholder.classList.remove('hidden');
+            } finally {
+                loader.classList.add('hidden');
+                scanBtn.disabled = false;
+            }
+        });
+
+        function handleAiResponse(data) {
+            if (data && data.date) {
+                extractedEvent = data;
+                eventTitle.textContent = data.title || 'No title found';
+                eventDate.textContent = data.date;
+                eventTime.textContent = data.time || 'Not specified';
+                
+                eventDetails.classList.remove('hidden');
+                resultsPlaceholder.classList.add('hidden');
+                addToCalendarBtn.disabled = false;
+            } else {
+                resultsPlaceholder.textContent = 'Could not find a valid date in the document. Please try another file.';
+                resultsPlaceholder.classList.remove('hidden');
+                addToCalendarBtn.disabled = true;
+            }
+        }
+
+        const toBase64 = file => new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = error => reject(error);
+        });
+
+        // --- 4. Add to Google Calendar ---
+        
+        addToCalendarBtn.addEventListener('click', async () => {
+            if (!extractedEvent || !extractedEvent.date) {
+                alert('No event data to add.');
+                return;
+            }
+            
+            // Check for Google login status
+            if (gapi.client.getToken() === null) {
+                calendarStatus.textContent = 'Please log in to Google to add events.';
+                calendarStatus.className = 'text-yellow-600';
+                handleAuthClick(); // Prompt user to log in
+                return;
+            }
+
+            addToCalendarBtn.disabled = true;
+            addToCalendarBtn.textContent = 'Adding...';
+
+            try {
+                const event = createCalendarEventObject();
+                const request = gapi.client.calendar.events.insert({
+                    'calendarId': 'primary',
+                    'resource': event
+                });
+
+                request.execute((eventResponse) => {
+                    console.log('Event created: ' + eventResponse.htmlLink);
+                    calendarStatus.innerHTML = `Event successfully created! <a href="${eventResponse.htmlLink}" target="_blank" class="text-blue-600 underline">View on Calendar</a>`;
+                    calendarStatus.className = 'text-green-600';
+                    addToCalendarBtn.textContent = 'Add to Google Calendar';
+                    // Don't re-enable, to prevent duplicate adds. User can re-scan.
+                });
+
+            } catch (error) {
+                console.error('Error creating calendar event:', error);
+                calendarStatus.textContent = `Error: ${error.message}`;
+                calendarStatus.className = 'text-red-600';
+                addToCalendarBtn.disabled = false;
+                addToCalendarBtn.textContent = 'Add to Google Calendar';
+            }
+        });
+        
+        function createCalendarEventObject() {
+            const { title, date, time } = extractedEvent;
+            
+            let startDateTime, endDateTime;
+            
+            if (time) {
+                // Event has a specific time
+                const startTimeString = `${date}T${time}:00`;
+                const start = new Date(startTimeString);
+                // Default to a 1-hour duration
+                const end = new Date(start.getTime() + 60 * 60 * 1000);
+                
+                startDateTime = start.toISOString();
+                endDateTime = end.toISOString();
+            } else {
+                // All-day event
+                startDateTime = date; // Format YYYY-MM-DD
+                
+                // For all-day events, the end date is exclusive. So add one day.
+                const nextDay = new Date(date);
+                nextDay.setDate(nextDay.getDate() + 2); // Add 2 to account for timezone issues and get the next day correctly
+                endDateTime = nextDay.toISOString().split('T')[0];
+            }
+            
+            const eventResource = {
+                'summary': title || 'New Event from Scan',
+                'start': {},
+                'end': {}
+            };
+
+            if (time) {
+                eventResource.start.dateTime = startDateTime;
+                eventResource.end.dateTime = endDateTime;
+            } else {
+                eventResource.start.date = startDateTime;
+                eventResource.end.date = endDateTime;
+            }
+            
+            return eventResource;
+        }
+
+        // --- Initial Load ---
+        window.onload = () => {
+            // Display the origin URL for the user
+            detectedUrlInput.value = window.location.origin;
+            loadCredentials();
+        };
+
+    </script>
+</body>
+</html>
