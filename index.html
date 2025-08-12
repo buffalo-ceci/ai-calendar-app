@@ -143,30 +143,31 @@
                         <div id="results-container" class="p-4 bg-blue-50 rounded-lg border border-blue-200 min-h-[200px] space-y-3">
                             <div id="loader" class="hidden loader mx-auto"></div>
                             <p id="results-placeholder" class="text-gray-500">AI analysis results will appear here...</p>
-                            <div id="event-details" class="hidden space-y-3">
+                            <div id="event-details" class="hidden space-y-2">
+                                <!-- MODIFIED: Changed to input/textarea for editing -->
                                 <div>
-                                    <label class="font-semibold">Title:</label>
-                                    <p id="event-title" class="text-gray-700 bg-white p-2 rounded"></p>
+                                    <label for="event-title" class="font-semibold">Title:</label>
+                                    <input type="text" id="event-title" class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
                                 </div>
                                 <div>
-                                    <label class="font-semibold">Date:</label>
-                                    <p id="event-date" class="text-gray-700 bg-white p-2 rounded"></p>
+                                    <label for="event-date" class="font-semibold">Date:</label>
+                                    <input type="text" id="event-date" class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
                                 </div>
                                 <div>
-                                    <label class="font-semibold">Time:</label>
-                                    <p id="event-time" class="text-gray-700 bg-white p-2 rounded"></p>
+                                    <label for="event-time" class="font-semibold">Time:</label>
+                                    <input type="text" id="event-time" class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
                                 </div>
                                 <div>
-                                    <label class="font-semibold">Host:</label>
-                                    <p id="event-host" class="text-gray-700 bg-white p-2 rounded"></p>
+                                    <label for="event-host" class="font-semibold">Host:</label>
+                                    <input type="text" id="event-host" class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
                                 </div>
                                 <div>
-                                    <label class="font-semibold">Meeting Place:</label>
-                                    <p id="event-location" class="text-gray-700 bg-white p-2 rounded"></p>
+                                    <label for="event-location" class="font-semibold">Meeting Place:</label>
+                                    <input type="text" id="event-location" class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
                                 </div>
                                 <div>
-                                    <label class="font-semibold">Remark:</label>
-                                    <p id="event-remark" class="text-gray-700 bg-white p-2 rounded min-h-[50px] whitespace-pre-wrap"></p>
+                                    <label for="event-remark" class="font-semibold">Remark:</label>
+                                    <textarea id="event-remark" class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" rows="3"></textarea>
                                 </div>
                             </div>
                         </div>
@@ -241,7 +242,6 @@
         let gapiInited = false;
         let gsiInited = false;
         let currentFile = null;
-        let extractedEvent = null;
         let cameraStream = null;
 
         // --- 1. Settings and Google Auth ---
@@ -352,7 +352,6 @@
         function handleFile(file) {
             if (!file) return;
             
-            // Validate file type
             if (!file.type.startsWith('image/') && file.type !== 'application/pdf') {
                 alert('Invalid file type. Please upload an image or PDF.');
                 return;
@@ -374,7 +373,6 @@
             handleFile(event.target.files[0]);
         });
 
-        // Drag and Drop Events
         dropArea.addEventListener('dragover', (event) => {
             event.preventDefault();
             dropArea.classList.add('drag-over');
@@ -391,7 +389,6 @@
             handleFile(file);
         });
 
-        // Camera Events
         cameraBtn.addEventListener('click', async () => {
             if (cameraStream) {
                 cameraStream.getTracks().forEach(track => track.stop());
@@ -425,7 +422,7 @@
             canvas.toBlob((blob) => {
                 const capturedFile = new File([blob], "capture.jpg", { type: "image/jpeg" });
                 handleFile(capturedFile);
-                closeCameraBtn.click(); // Close camera view after capture
+                closeCameraBtn.click();
             }, 'image/jpeg');
         });
 
@@ -473,7 +470,6 @@
             resultsPlaceholder.classList.remove('hidden');
             eventDetails.classList.add('hidden');
             addToCalendarBtn.disabled = true;
-            extractedEvent = null;
             calendarStatus.textContent = '';
         }
 
@@ -504,17 +500,18 @@
                 
                 const base64ImageData = base64Data.split(',')[1];
 
-                const prompt = `Analyze this document. Extract the following information: event title, full date (including year), start time, host, location, and a brief remark or summary.
+                // MODIFIED: Updated AI Prompt
+                const prompt = `Analyze this document. Extract the following information: event title, full date (including year), start time, the host's name (a person, not a company), location, and a brief remark.
 Respond ONLY with a valid JSON object with the following keys: "title", "date", "time", "host", "location", "remark".
 - "title" should be a concise string.
 - "date" should be in YYYY-MM-DD format.
 - "time" should be in HH:MM (24-hour) format.
-- "host" should be the organizing body or person.
+- "host" should be the name of a person (e.g., a presenter or contact person). If a person's name is not found, its value should be an empty string "".
 - "location" should be the meeting place or address.
 - "remark" should be any additional notes or summary.
-If any piece of information is not found, its value should be an empty string "".
+If any other piece of information is not found, its value should be an empty string "".
 Please respond in Traditional Chinese (zh-tw).
-Example response: {"title": "團隊會議", "date": "2025-09-15", "time": "14:00", "host": "工程部門", "location": "301會議室", "remark": "討論第三季成果。"}`;
+Example response: {"title": "團隊會議", "date": "2025-09-15", "time": "14:00", "host": "王大明", "location": "301會議室", "remark": "討論第三季成果。"}`;
 
                 const payload = {
                     contents: [{
@@ -558,15 +555,15 @@ Example response: {"title": "團隊會議", "date": "2025-09-15", "time": "14:00
             }
         });
 
+        // MODIFIED: Sets values of input fields instead of textContent
         function handleAiResponse(data) {
             if (data && data.date) {
-                extractedEvent = data;
-                eventTitle.textContent = data.title || '無標題';
-                eventDate.textContent = data.date;
-                eventTime.textContent = data.time || '未指定';
-                eventHost.textContent = data.host || '未指定';
-                eventLocation.textContent = data.location || '未指定';
-                eventRemark.textContent = data.remark || '無備註';
+                eventTitle.value = data.title || '';
+                eventDate.value = data.date || '';
+                eventTime.value = data.time || '';
+                eventHost.value = data.host || '';
+                eventLocation.value = data.location || '';
+                eventRemark.value = data.remark || '';
                 
                 eventDetails.classList.remove('hidden');
                 resultsPlaceholder.classList.add('hidden');
@@ -588,8 +585,9 @@ Example response: {"title": "團隊會議", "date": "2025-09-15", "time": "14:00
         // --- 4. Add to Google Calendar ---
         
         addToCalendarBtn.addEventListener('click', async () => {
-            if (!extractedEvent || !extractedEvent.date) {
-                alert('No event data to add.');
+            // MODIFIED: Reads from the input field directly
+            if (!document.getElementById('event-date').value) {
+                alert('Date is required to create an event.');
                 return;
             }
             
@@ -626,41 +624,49 @@ Example response: {"title": "團隊會議", "date": "2025-09-15", "time": "14:00
             }
         });
         
+        // MODIFIED: Reads data from the editable input fields
         function createCalendarEventObject() {
-            const { title, date, time, host, location, remark } = extractedEvent;
-            
+            const eventData = {
+                title: document.getElementById('event-title').value,
+                date: document.getElementById('event-date').value,
+                time: document.getElementById('event-time').value,
+                host: document.getElementById('event-host').value,
+                location: document.getElementById('event-location').value,
+                remark: document.getElementById('event-remark').value
+            };
+
             let startDateTime, endDateTime;
             
-            if (time) {
-                const startTimeString = `${date}T${time}:00`;
+            if (eventData.time) {
+                const startTimeString = `${eventData.date}T${eventData.time}:00`;
                 const start = new Date(startTimeString);
                 const end = new Date(start.getTime() + 60 * 60 * 1000); // Default 1 hour duration
                 startDateTime = start.toISOString();
                 endDateTime = end.toISOString();
             } else {
-                startDateTime = date;
-                const nextDay = new Date(date);
+                startDateTime = eventData.date;
+                const nextDay = new Date(eventData.date);
                 nextDay.setDate(nextDay.getDate() + 2);
                 endDateTime = nextDay.toISOString().split('T')[0];
             }
             
             let description = '';
-            if (host) {
-                description += `主辦單位: ${host}\n\n`;
+            if (eventData.host) {
+                description += `主持人: ${eventData.host}\n\n`;
             }
-            if (remark) {
-                description += `備註:\n${remark}`;
+            if (eventData.remark) {
+                description += `備註:\n${eventData.remark}`;
             }
 
             const eventResource = {
-                'summary': title || 'New Event from Scan',
-                'location': location || '',
+                'summary': eventData.title || 'New Event from Scan',
+                'location': eventData.location || '',
                 'description': description.trim(),
                 'start': {},
                 'end': {}
             };
 
-            if (time) {
+            if (eventData.time) {
                 eventResource.start.dateTime = startDateTime;
                 eventResource.end.dateTime = endDateTime;
             } else {
